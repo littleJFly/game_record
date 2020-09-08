@@ -1,0 +1,129 @@
+###问题记录###
+
+
+
+
+
+【问题记录】:
+1:数据转换类型
+	int -> byte时报错，因为没有进行强制类型转换
+	int a = 10;
+	byte b = a; // error
+	
+	byte b = (byte)a; // 正确
+	
+2:sqlupdate中添加配置表
+  1:如果是大厅和游戏服公用的，放在大厅或者db服
+  2:启动顺序,db服,worldServer,gameServer,gateServer
+  
+  guide_module_control_conf在游戏服配置初始化，由于先
+  启动大厅服，导致报错
+  
+3:新缓存DO工具
+  1:如果玩家在大厅内，不在游戏内，修改对应DO，退出游戏保存到数据库
+  2:如果玩家在游戏内，此时大厅内缓存DO也存在，如果请求是发放大厅的
+	操作大厅的缓存数据，此时游戏服的缓存DO数据会有问题，需要到游戏内修改
+  3:在退出游戏至大厅时，DO数据会同步，替换大厅缓存DO，保证一致性。
+  
+4:如果world和game都需要同一份配置，在gamecore包下面，需要启动game和world的时候都要初始化，否则一个服务器会拿不到数据
+  
+  
+5:新缓存模型
+MysqlDataModifyApi.INSTANCE.selectManyByParam（）：自定义多参数查询，如果玩家id不是主键的话自己特殊处理，不然无法查询出数据
+  
+  
+6:类似限时商店，按照时间点刷新，可以依据凌晨0点的时间戳作为刷新时间，比较准确
+
+
+7:使用redis做排行榜，一定要设置过期key值，例如周榜，一定要使用每周一的凌晨0点时间点作为key，否则跨年时会有问题
+  对应key值如果不做过期处理，会出现重叠，此时数据为叠加。
+  
+  例如捕鱼积分周榜    2020年的第二周数据和2019年的第二周数据重叠 此时对应key值下的member（一般是playerId）score会累加，导致脏数据
+
+8:使用新缓存模型，delete数据时要注意（尽量不做delete操作），如果一个data数据被删除，此时又新加一条相同primarykey的数据，会操作失败
+   精灵系统中原先设计的每件装备有个seq，按照当前seq最大值 + 1来掉落装备，此时分解掉之后，删除记录，刚好掉落一个seq一样的装备，出错
+   
+   在设计上避免此问题，不要做移除操作
+
+
+
+
+##################################################################### java problems ##############################################################################
+
+1:使用RunTime.getRunTime().addShutdownHook优雅关闭线程池
+
+RunTime.getRunTime().addShutdownHook的作用就是在JVM销毁前执行的一个线程.当然这个线程依然要自己写.
+
+Runtime.getRuntime().addShutdownHook(new Thread() {
+   public void run() {
+      shutdownGracefully();
+   }
+});
+
+public void shutdownGracefully() {
+   shutdownThreadPool(streamThreadPool, "main-pool");
+}
+
+
+JDK提供了Java.Runtime.addShutdownHook(Thread hook)方法，可以注册一个JVM关闭的钩子，这个钩子可以在以下几种场景中被调用：
+
+程序正常退出
+使用System.exit()
+终端使用Ctrl+C触发的中断
+系统关闭
+OutOfMemory宕机
+使用Kill pid命令干掉进程（注：在使用kill -9 pid时，是不会被调用的）
+Runtime.getRuntime().addShutdownHook(shutdownHook);
+
+
+/**
+ * 优雅关闭线程池
+ * @param threadPool
+ * @param alias
+ */
+private void shutdownThreadPool(ExecutorService threadPool, String alias) {
+   log.info("Start to shutdown the thead pool: {}", alias);
+
+   threadPool.shutdown(); // 使新任务无法提交.
+   try {
+      // 等待未完成任务结束
+      if (!threadPool.awaitTermination(60, TimeUnit.SECONDS)) {
+         threadPool.shutdownNow(); // 取消当前执行的任务
+         log.warn("Interrupt the worker, which may cause some task inconsistent. Please check the biz logs.");
+
+         // 等待任务取消的响应
+         if (!threadPool.awaitTermination(60, TimeUnit.SECONDS))
+            log.error("Thread pool can't be shutdown even with interrupting worker threads, which may cause some task inconsistent. Please check the biz logs.");
+      }
+   } catch (InterruptedException ie) {
+      // 重新取消当前线程进行中断
+      threadPool.shutdownNow();
+      log.error("The current server thread is interrupted when it is trying to stop the worker threads. This may leave an inconcistent state. Please check the biz logs.");
+
+      // 保留中断状态
+      Thread.currentThread().interrupt();
+   }
+
+   log.info("Finally shutdown the thead pool: {}", alias);
+}
+
+这样我们就可以在JVM销毁前无论有没有执行的线程都会进行中断,然后关闭线程池.
+
+
+2:ScheduledExecutorService中scheduleWithFixedDelay()和scheduleAtFixedRate()的区别？
+
+scheduleWithFixedDelay从字面意义上可以理解为就是以固定延迟（时间）来执行线程任务，它实际上是不管线程任务的执行时间的，每次都要把任务执行完成后再延迟固定时间后再执行下一次。
+
+而scheduleAtFixedRate呢，是以固定频率来执行线程任务，固定频率的含义就是可能设定的固定时间不足以完成线程任务，但是它不管，达到设定的延迟时间了就要执行下一次了。
+
+
+3:BigDecimal常见异常
+除法的时候出现异常
+java.lang.ArithmeticException: Non-terminating decimal expansion; no exact representable decimal result
+原因分析：
+
+​通过BigDecimal的divide方法进行除法时当不整除，出现无限循环小数时，就会抛异常：java.lang.ArithmeticException: Non-terminating decimal expansion; no exact representable decimal result.
+
+解决方法：
+
+​divide方法设置精确的小数点，如：divide(xxxxx,2)
