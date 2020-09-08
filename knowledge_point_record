@@ -1,0 +1,18 @@
+#### 知识点记录  #####
+
+ps -ef | grep java  -- 查看进程信息
+
+kill -9 xxx  -- 杀进程 xxx
+
+killall telnet   -- 怕不小心删错进程,导致位置错误,,安全的杀死进程方法:
+
+jmap -heap <pid>　　打印堆的使用情况
+
+jmap -histo[:live] <pid>　　打印类的实例数量、占用的内存、类的名称，通常我们并不需要看所有的，只需要看前几条即可
+
+jmap -dump:live,format=b,file=heap.bin <pid>　　
+以hprof二进制格式dump堆的使用情况（PS：相当于生成一个快照，后续我们可以对这个快照文件进行分析）
+
+jstack [pid] ,线程的所有堆栈信息 可以查看线程执行状态，是否死锁
+
+jstat -gcutil pid interval(ms) : 查看jvm gc垃圾回收情况 (间隔时间不加的话默认直接打印一条)
